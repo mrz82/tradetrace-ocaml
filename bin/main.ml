@@ -136,10 +136,10 @@ let () =
   let pf_naive = Positions.calculate_at 1006 state_pre_corr in
   let pf_corr  = Positions.calculate_at 1006 state in
   Printf.printf "\n  [seq ≤ 15, trade_time ≤ 1006] — AMZN cash before correction:\n";
-  Printf.printf "    AMZN cash leg: %s\n"
+  Printf.printf "    Portfolio cash: %s\n"
     (let c = pf_naive.cash_cents in
      Printf.sprintf "%s$%d.%02d" (if c<0 then "-" else "+") (abs c/100) (abs c mod 100));
   Printf.printf "\n  [all seqs, trade_time ≤ 1006] — AMZN cash with hindsight correction:\n";
-  Printf.printf "    AMZN cash leg: %s\n"
+  Printf.printf "    Portfolio cash: %s\n"
     (let c = pf_corr.cash_cents in
      Printf.sprintf "%s$%d.%02d" (if c<0 then "-" else "+") (abs c/100) (abs c mod 100))

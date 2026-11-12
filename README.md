@@ -170,10 +170,10 @@ $ dune exec tradetrace
   Cash    -$38960.00
 
   [seq ≤ 15, trade_time ≤ 1006] — AMZN cash before correction:
-    AMZN cash leg: -$26200.00
+    Portfolio cash: -$26200.00
 
   [all seqs, trade_time ≤ 1006] — AMZN cash with hindsight correction:
-    AMZN cash leg: -$26190.00
+    Portfolio cash: -$26190.00
 ```
 
 The last two lines show the same portfolio filtered to `trade_time ≤ 1006`. Before the correction (seq ≤ 15), the AMZN fill is priced at $189.60; in the full replay, it is corrected to $189.20. The $10 difference is 25 shares × $0.40.
@@ -193,7 +193,7 @@ dune runtest                                    # 96 automated tests
 ./_build/default/test/test_tradetrace.exe       # run test binary directly
 ```
 
-A GitHub Actions CI workflow is included at `.github/workflows/ci.yml`. It builds and runs `dune runtest` on Ubuntu using OCaml 4.14.1. No CI badge is shown here until the workflow has actually run on GitHub.
+A GitHub Actions CI workflow is included at `.github/workflows/ci.yml`. It builds and runs `dune runtest` on Ubuntu using OCaml 4.14.5. No CI badge is shown here until the workflow has actually run on GitHub.
 
 ---
 
