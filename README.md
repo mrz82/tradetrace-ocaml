@@ -46,6 +46,7 @@ flowchart LR
 | `Replay` | Sorts events by `seq`, then folds `apply_event` over the sorted list. Validates qty/price sign, limit prices, symbol/side consistency, and overfills at both execution and correction time. All failures are non-fatal and go to `state.errors`. |
 | `Reconcile` | Compares post-correction executions against broker confirms. Returns one of eight status codes per execution. Checks symbol and side before price and quantity, because a wrong symbol is likely a routing error — a different problem than a price discrepancy. |
 | `Positions` | Derives net positions and cash balance from resolved executions. `calculate` returns the full current state; `calculate_at trade_cutoff` filters by exchange timestamp. |
+| `Pnl` | Derives unrealized P&L per open symbol given mark prices. `correction_impact` returns the before/after cost basis delta for any correction — the number a TDOE checks at end of day to see what a price correction actually did to the books. |
 
 ---
 
@@ -174,6 +175,18 @@ $ dune exec tradetrace
 
   [all seqs, trade_time ≤ 1006] — AMZN cash with hindsight correction:
     Portfolio cash: -$26190.00
+
+=== P&L (mark: AAPL=$180.10  AMZN=$190.00  GOOG=$1745.00  MSFT=$420.00) ===
+  AAPL    avg=$179.85  net=+100  unrealized=+$25.00
+  AMZN    avg=$189.20  net=+25  unrealized=+$20.00
+  GOOG    avg=$1750.00  net=-10  unrealized=+$50.00
+  MSFT    avg=$419.50  net=+50  unrealized=+$25.00
+  Total unrealized: +$120.00
+
+=== P&L Impact of CORR-001 (EX-004 / AMZN) ===
+  Before correction:  cash flow = -$4740.00
+  After correction:   cash flow = -$4730.00
+  Cost basis change:  +$10.00
 ```
 
 The last two lines show the same portfolio filtered to `trade_time ≤ 1006`. Before the correction (seq ≤ 15), the AMZN fill is priced at $189.60; in the full replay, it is corrected to $189.20. The $10 difference is 25 shares × $0.40.
@@ -189,7 +202,7 @@ eval $(opam env)
 
 dune build                                      # compile everything
 dune exec tradetrace                            # run the demo
-dune runtest                                    # 96 automated tests
+dune runtest                                    # 106 automated tests
 ./_build/default/test/test_tradetrace.exe       # run test binary directly
 ```
 

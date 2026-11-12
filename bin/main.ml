@@ -70,6 +70,11 @@ let events = [
                  trade_time = 1008; arrival_time = 1053; seq = 33 };
 ]
 
+(* Demo mark prices — in production these would come from a market data feed *)
+let mark_prices =
+  List.fold_left (fun m (k, v) -> StringMap.add k v m) StringMap.empty
+    [("AAPL", 18010); ("AMZN", 19000); ("GOOG", 174500); ("MSFT", 42000)]
+
 let pp_portfolio pf =
   StringMap.iter (fun sym pos ->
     Printf.printf "  %-6s  %+d\n" sym pos.Positions.net_qty
@@ -142,4 +147,28 @@ let () =
   Printf.printf "\n  [all seqs, trade_time ≤ 1006] — AMZN cash with hindsight correction:\n";
   Printf.printf "    Portfolio cash: %s\n"
     (let c = pf_corr.cash_cents in
-     Printf.sprintf "%s$%d.%02d" (if c<0 then "-" else "+") (abs c/100) (abs c mod 100))
+     Printf.sprintf "%s$%d.%02d" (if c<0 then "-" else "+") (abs c/100) (abs c mod 100));
+
+  let fmt_signed c =
+    Printf.sprintf "%s$%d.%02d"
+      (if c < 0 then "-" else "+") (abs c / 100) (abs c mod 100)
+  in
+
+  Printf.printf "\n=== P&L (mark: AAPL=$180.10  AMZN=$190.00  GOOG=$1745.00  MSFT=$420.00) ===\n";
+  let pnl = Pnl.calculate state ~mark_prices in
+  StringMap.iter (fun _ (p : Pnl.position_pnl) ->
+    Printf.printf "  %-6s  avg=%s  net=%+d  unrealized=%s\n"
+      p.symbol
+      (pp_price p.avg_entry_cents)
+      p.net_qty
+      (fmt_signed p.unrealized_cents)
+  ) pnl.Pnl.by_symbol;
+  Printf.printf "  Total unrealized: %s\n" (fmt_signed pnl.Pnl.total_unrealized_cents);
+
+  Printf.printf "\n=== P&L Impact of CORR-001 (EX-004 / AMZN) ===\n";
+  (match Pnl.correction_impact state ~correction_id:"CORR-001" with
+   | None -> Printf.printf "  correction not found\n"
+   | Some ci ->
+     Printf.printf "  Before correction:  cash flow = %s\n" (fmt_signed ci.Pnl.before_cents);
+     Printf.printf "  After correction:   cash flow = %s\n" (fmt_signed ci.Pnl.after_cents);
+     Printf.printf "  Cost basis change:  %s\n"             (fmt_signed ci.Pnl.delta_cents))

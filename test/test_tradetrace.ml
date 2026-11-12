@@ -1055,6 +1055,179 @@ let () =
 
 (* ------------------------------------------------------------------ *)
 
+let () = Printf.printf "\n=== P&L tests ===\n%!"
+
+(* Unrealized P&L: long position gains when mark exceeds entry *)
+let () =
+  let state = Replay.replay [
+    mk_order "O1" "X" Buy 100 1;
+    mk_exec  "E1" "O1" "X" Buy 100 10000 2;
+  ] in
+  let marks = StringMap.singleton "X" 11000 in
+  let pnl = Pnl.calculate state ~mark_prices:marks in
+  check "unrealized P&L long: mark above entry = gain"
+    (match StringMap.find_opt "X" pnl.Pnl.by_symbol with
+     | Some p -> p.Pnl.unrealized_cents = 100 * (11000 - 10000)
+     | None   -> false)
+
+(* Unrealized P&L: short position gains when mark falls below entry *)
+let () =
+  let state = Replay.replay [
+    mk_order "O1" "X" Sell 100 1;
+    mk_exec  "E1" "O1" "X" Sell 100 20000 2;
+  ] in
+  let marks = StringMap.singleton "X" 19000 in
+  let pnl = Pnl.calculate state ~mark_prices:marks in
+  check "unrealized P&L short: mark below entry = gain"
+    (match StringMap.find_opt "X" pnl.Pnl.by_symbol with
+     (* net_qty=-100, net_cost=-2000000; unrealized = -100*19000 - (-2000000) = +100000 *)
+     | Some p -> p.Pnl.unrealized_cents = 100000
+     | None   -> false)
+
+(* No mark price supplied: unrealized is zero, position still present *)
+let () =
+  let state = Replay.replay [
+    mk_order "O1" "X" Buy 100 1;
+    mk_exec  "E1" "O1" "X" Buy 100 10000 2;
+  ] in
+  let pnl = Pnl.calculate state ~mark_prices:StringMap.empty in
+  check "no mark supplied: unrealized = 0"
+    (match StringMap.find_opt "X" pnl.Pnl.by_symbol with
+     | Some p -> p.Pnl.unrealized_cents = 0
+     | None   -> false)
+
+(* Flat position (buy then sell at same price) is excluded from by_symbol *)
+let () =
+  let state = Replay.replay [
+    mk_order "O1" "X" Buy  100 1;
+    mk_order "O2" "X" Sell 100 2;
+    mk_exec  "E1" "O1" "X" Buy  100 10000 3;
+    mk_exec  "E2" "O2" "X" Sell 100 10000 4;
+  ] in
+  let pnl = Pnl.calculate state ~mark_prices:(StringMap.singleton "X" 12000) in
+  check "flat position excluded from by_symbol"
+    (not (StringMap.mem "X" pnl.Pnl.by_symbol))
+
+(* avg_entry_cents is the weighted average across all fills *)
+let () =
+  let state = Replay.replay [
+    mk_order "O1" "X" Buy 200 1;
+    mk_exec  "E1" "O1" "X" Buy 100 10000 2;
+    mk_exec  "E2" "O1" "X" Buy 100 11000 3;
+  ] in
+  let pnl = Pnl.calculate state ~mark_prices:StringMap.empty in
+  check "avg_entry_cents: weighted average of two fills"
+    (match StringMap.find_opt "X" pnl.Pnl.by_symbol with
+     | Some p -> p.Pnl.avg_entry_cents = 10500
+     | None   -> false)
+
+(* total_unrealized_cents sums across all symbols *)
+let () =
+  let state = Replay.replay [
+    mk_order "O1" "X" Buy 100 1;
+    mk_order "O2" "Y" Buy 100 2;
+    mk_exec  "E1" "O1" "X" Buy 100 10000 3;
+    mk_exec  "E2" "O2" "Y" Buy 100 20000 4;
+  ] in
+  let marks =
+    List.fold_left (fun m (k, v) -> StringMap.add k v m) StringMap.empty
+      [("X", 11000); ("Y", 21000)]
+  in
+  let pnl = Pnl.calculate state ~mark_prices:marks in
+  check "total_unrealized_cents sums all symbols"
+    (pnl.Pnl.total_unrealized_cents =
+       100 * (11000 - 10000) + 100 * (21000 - 20000))
+
+(* Unrealized P&L uses corrected price, not the original *)
+let () =
+  let state = Replay.replay [
+    mk_order      "O1" "X" Buy 100 1;
+    mk_exec       "E1" "O1" "X" Buy 100 10000 2;
+    mk_correction "C1" "E1" 100 9500 3;
+  ] in
+  let marks = StringMap.singleton "X" 10000 in
+  let pnl = Pnl.calculate state ~mark_prices:marks in
+  check "unrealized P&L uses corrected price: avg=9500 so unrealized=+$500"
+    (match StringMap.find_opt "X" pnl.Pnl.by_symbol with
+     | Some p -> p.Pnl.unrealized_cents = 100 * (10000 - 9500)
+     | None   -> false)
+
+(* correction_impact: buy exec price corrected down — cost falls, delta positive *)
+let () =
+  let state = Replay.replay [
+    mk_order      "O1" "X" Buy 100 1;
+    mk_exec       "E1" "O1" "X" Buy 50 5100 2;
+    mk_correction "C1" "E1" 50 5000 3;
+  ] in
+  check "correction_impact buy: price down = positive delta"
+    (match Pnl.correction_impact state ~correction_id:"C1" with
+     | Some ci ->
+       ci.Pnl.exec_id      = "E1"           &&
+       ci.Pnl.symbol       = "X"            &&
+       ci.Pnl.before_cents = -(50 * 5100)   &&
+       ci.Pnl.after_cents  = -(50 * 5000)   &&
+       ci.Pnl.delta_cents  = 50 * (5100 - 5000)
+     | None -> false)
+
+(* correction_impact: sell exec price corrected down — proceeds fall, delta negative *)
+let () =
+  let state = Replay.replay [
+    mk_order      "O1" "X" Sell 100 1;
+    mk_exec       "E1" "O1" "X" Sell 50 5000 2;
+    mk_correction "C1" "E1" 50 4900 3;
+  ] in
+  check "correction_impact sell: price down = negative delta"
+    (match Pnl.correction_impact state ~correction_id:"C1" with
+     | Some ci ->
+       ci.Pnl.before_cents = 50 * 5000                 &&
+       ci.Pnl.after_cents  = 50 * 4900                 &&
+       ci.Pnl.delta_cents  = 50 * (4900 - 5000)
+     | None -> false)
+
+(* correction_impact: unknown correction_id returns None *)
+let () =
+  let state = Replay.replay [
+    mk_order "O1" "X" Buy 100 1;
+    mk_exec  "E1" "O1" "X" Buy 50 5000 2;
+  ] in
+  check "correction_impact: unknown correction_id returns None"
+    (Pnl.correction_impact state ~correction_id:"GHOST" = None)
+
+(* Regression: first correction in a two-correction chain — before = original execution *)
+let () =
+  let state = Replay.replay [
+    mk_order      "O1" "X" Buy 100 1;
+    mk_exec       "E1" "O1" "X" Buy 50 5000 2;
+    mk_correction "C1" "E1" 50 4800 3;
+    mk_correction "C2" "E1" 50 4700 4;
+  ] in
+  check "multi-correction: first correction before = original execution price"
+    (match Pnl.correction_impact state ~correction_id:"C1" with
+     | Some ci ->
+       ci.Pnl.before_cents = -(50 * 5000) &&
+       ci.Pnl.after_cents  = -(50 * 4800) &&
+       ci.Pnl.delta_cents  = 50 * (5000 - 4800)
+     | None -> false)
+
+(* Regression: second correction in a chain — before = first correction's price, not original *)
+let () =
+  let state = Replay.replay [
+    mk_order      "O1" "X" Buy 100 1;
+    mk_exec       "E1" "O1" "X" Buy 50 5000 2;
+    mk_correction "C1" "E1" 50 4800 3;
+    mk_correction "C2" "E1" 50 4700 4;
+  ] in
+  check "multi-correction: second correction before = first correction's price"
+    (match Pnl.correction_impact state ~correction_id:"C2" with
+     | Some ci ->
+       (* before must be C1's after-state: -(50 * 4800), NOT -(50 * 5000) *)
+       ci.Pnl.before_cents = -(50 * 4800) &&
+       ci.Pnl.after_cents  = -(50 * 4700) &&
+       ci.Pnl.delta_cents  = 50 * (4800 - 4700)
+     | None -> false)
+
+(* ------------------------------------------------------------------ *)
+
 let () =
   Printf.printf "\n";
   match !failures with
